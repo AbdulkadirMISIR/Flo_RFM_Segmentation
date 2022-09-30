@@ -1,0 +1,150 @@
+import datetime as dt
+import pandas as pd
+pd.set_option('display.max_columns', None)
+pd.set_option('display.width', 500)
+pd.set_option('display.float_format', lambda x: '%.3f' % x)
+
+# flo_data_20K.csv verisini okuyunuz.Dataframe’in kopyasını oluşturunuz.
+
+df = pd.read_csv("C:/Users/DopingHafiza/PycharmProjects/crm/flo_data_20k.csv")
+df = df.copy()
+
+# Veri setinde
+##a. İlk 10 gözlem,
+##b. Değişken isimleri,
+##c. Betimsel istatistik,
+##d. Boş değer,
+##e. Değişken tipleri, incelemesi yapınız.
+
+df.head(10)
+df.columns
+df.describe().T
+df.isnull().sum()
+df.info()
+
+# Omnichannel müşterilerin hem online'dan hemde offline platformlardan alışveriş yaptığını ifade etmektedir. Her bir müşterinin toplam
+# alışveriş sayısı ve harcaması için yeni değişkenler oluşturunuz.
+
+df["total_customer_value"] = df["customer_value_total_ever_offline"] + df["customer_value_total_ever_online"]
+df["total_customer_order"] = df["order_num_total_ever_online"] + df["order_num_total_ever_offline"]
+df.head()
+
+# Değişken tiplerini inceleyiniz. Tarih ifade eden değişkenlerin tipini date'e çevirini
+
+df["first_order_date"] = pd.to_datetime(df["first_order_date"])
+df["last_order_date"] = pd.to_datetime(df["last_order_date"])
+df["last_order_date_online"] = pd.to_datetime(df["last_order_date_online"])
+df["last_order_date_offline"] = pd.to_datetime(df["last_order_date_offline"])
+
+# Alışveriş kanallarındaki müşteri sayısının, toplam alınan ürün sayısının ve toplam harcamaların dağılımına bakınız.
+
+
+df.groupby("order_channel").agg({"master_id": ["count"],
+                                 "total_customer_order": ["sum", "mean", "count"],
+                                 "total_customer_value": ["sum", "mean", "count"]}).head()
+
+# En fazla kazancı getiren ilk 10 müşteriyi sıralayınız.
+
+df[["master_id", "total_customer_order", "total_customer_value"]].sort_values("total_customer_value",
+                                                                              ascending=False).head(10)
+
+# En fazla siparişi veren ilk 10 müşteriyi sıralayınız.
+
+df[["master_id", "total_customer_order", "total_customer_value"]].sort_values("total_customer_order",
+                                                                              ascending=False).head(10)
+
+
+# Veri ön hazırlık sürecini fonksiyonlaştırınız.
+
+
+def create_rfm_flo(dataframe, csv=False):
+    # VERIYI HAZIRLAMA
+
+    dataframe["total_customer_value"] = dataframe["customer_value_total_ever_offline"] + dataframe[
+        "customer_value_total_ever_online"]
+    dataframe["total_customer_order"] = dataframe["order_num_total_ever_online"] + dataframe[
+        "order_num_total_ever_offline"]
+    dataframe.dropna(inplace=True)
+
+    df["total_customer_value"] = df["customer_value_total_ever_offline"] + df["customer_value_total_ever_online"]
+    df["total_customer_order"] = df["order_num_total_ever_online"] + df["order_num_total_ever_offline"]
+
+    df["first_order_date"] = pd.to_datetime(df["first_order_date"])
+    df["last_order_date"] = pd.to_datetime(df["last_order_date"])
+    df["last_order_date_online"] = pd.to_datetime(df["last_order_date_online"])
+    df["last_order_date_offline"] = pd.to_datetime(df["last_order_date_offline"])
+
+    return dataframe
+
+# Recency, Frequency ve Monetary tanımlarını yapınız.
+##Recency : Müşterinin yeniliğini ifade eder.
+##Frequency : Müşterinin yapmış olduğu toplam satın almadır.
+##Monetary : Müşterinin toplam satın almalar karşılığı ödediği toplam parasal değerdir.
+
+
+df.head()
+df["last_order_date"].max()
+
+today_date = dt.datetime(2021, 6, 1)
+type(today_date)
+df["interested_in_categories_12"].nunique()
+rfm = df.groupby("master_id").agg({"last_order_date": lambda last_order_date: (today_date - last_order_date.max()).days,
+                                   "interested_in_categories_12": lambda
+                                       interested_in_categories_12: interested_in_categories_12.nunique(),
+                                   "total_customer_value": lambda total_customer_value: total_customer_value.sum()})
+
+rfm.columns = ["recency", "frequency", "monetary"]
+
+# Recency, Frequency ve Monetary metriklerini qcut yardımı ile 1-5 arasında skorlara çeviriniz.
+
+rfm["recency_score"] = pd.qcut(rfm["recency"], 5, labels=[5, 4, 3, 2, 1])
+rfm["frequency_score"] = pd.qcut(rfm["frequency"].rank(method="first"), 5, labels=[5, 4, 3, 2, 1])
+rfm["monetary_score"] = pd.qcut(rfm["monetary"], 5, labels=[5, 4, 3, 2, 1])
+
+# recency_score ve frequency_score’u tek bir değişken olarak ifade ediniz ve RF_SCORE olarak kaydediniz.
+
+rfm["RF_SCORE"] = rfm["recency_score"].astype(str) + rfm["frequency_score"].astype(str)
+
+# Oluşturulan RF skorları için segment tanımlamaları yapınız.
+
+seg_map = {
+    r'[1-2][1-2]': 'hibernating',
+    r'[1-2][3-4]': 'at_Risk',
+    r'[1-2]5': 'cant_loose',
+    r'3[1-2]': 'about_to_sleep',
+    r'33': 'need_attention',
+    r'[3-4][4-5]': 'loyal_customers',
+    r'41': 'promising',
+    r'51': 'new_customers',
+    r'[4-5][2-3]': 'potential_loyalists',
+    r'5[4-5]': 'champions'
+}
+
+rfm["SEGMENT"] = rfm["RF_SCORE"].replace(seg_map, regex=True)
+rfm["SEGMENT"].value_counts()
+
+# Segmentlerin recency, frequnecy ve monetary ortalamalarını inceleyiniz.
+
+rfm[["SEGMENT", "recency", "frequency", "monetary"]].groupby("SEGMENT").agg(["mean", "count"])
+
+#RFM analizi yardımıyla aşağıda verilen 2 case için ilgili profildeki müşterileri bulun ve müşteri id'lerini csv olarak kaydediniz.
+##a. FLO bünyesine yeni bir kadın ayakkabı markası dahil ediyor. Dahil ettiği markanın ürün fiyatları genel müşteri
+##tercihlerinin üstünde. Bu nedenle markanın tanıtımı ve ürün satışları için ilgilenecek profildeki müşterilerle özel olarak
+##iletişime geçmek isteniliyor. Sadık müşterilerinden(champions, loyal_customers) ve kadın kategorisinden alışveriş
+##yapan kişiler özel olarak iletişim kurulacak müşteriler. Bu müşterilerin id numaralarını csv dosyasına kaydediniz.
+
+rfm = pd.merge(df[["interested_in_categories_12","master_id"]],rfm, on = "master_id")
+new_df_a1 = pd.DataFrame()
+new_df_a1["new_customer_id"] = rfm[(rfm["SEGMENT"] == "champions") | (rfm["SEGMENT"] == "loyal_customers")].index
+new_df_a2["new_customer_id"] = rfm[rfm["interested_in_categories_12"].str.contains("KADIN")].index
+
+new_df_a["new_customer_id"] = seg.index +seg2.index
+new_df_a.to_csv("new_df_a.csv")
+
+#Erkek ve Çocuk ürünlerinde %40'a yakın indirim planlanmaktadır. Bu indirimle ilgili kategorilerle ilgilenen geçmişte
+#iyi müşteri olan ama uzun süredir alışveriş yapmayan kaybedilmemesi gereken müşteriler, uykuda olanlar ve yeni
+#gelen müşteriler özel olarak hedef alınmak isteniyor. Uygun profildeki müşterilerin id'lerini csv dosyasına kaydediniz.
+
+new_df_b = pd.DataFrame()
+new_df_b["new_customer_id"] = rfm[((rfm["SEGMENT"] == "about_to_sleep") | (rfm["SEGMENT"] == "new_customers")) & (rfm["interested_in_categories_12"].str.contains("KADIN")) ].index
+new_df_b.to_csv("new_df_b.csv")
